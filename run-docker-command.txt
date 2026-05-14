@@ -1,13 +1,31 @@
-— Run new container (fresh start)
+🔥 SAFE UPGRADE STEPS (DO THIS)
+1. Stop current Jenkins
+
+docker stop jenkins
+
+
+2. Remove container (NOT volume)
+
+docker rm jenkins
+
+3. Pull new Jenkins version (example: 2.555.2) or rebuild new image
+
+docker pull jenkins/jenkins:2.555.2-lts
+docker build -t my-jenkins-image .
+
+
+4. Run new container (same volume = safe upgrade)
+docker rm -f jenkins
+
 docker run -d \
+  --name jenkins \
   -p 8080:8080 \
   -p 50000:50000 \
   -v jenkins_home:/var/jenkins_home \
-  -v //var/run/docker.sock:/var/run/docker.sock \
-  --name jenkins \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   my-jenkins-image
 
-  docker start jenkins
+  docker start  my-jenkins-image
 
 
  grab password docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
