@@ -2,146 +2,80 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "jaysoft007/my-app"
-        TAG = "latest"
-        DOCKER_CREDS = credentials('dockerhub-creds')
+        IMAGE_NAME = "my-jenkins-app"
+        DOCKERHUB_USER = "jaysoft007"
+    }
+
+    triggers {
+        githubPush()
     }
 
     stages {
 
-        stage('Checkout') {
+        stage('Checkout Code') {
             steps {
-                git 'https://github.com/jaysofty/my-app.git'
+                git branch: 'main',
+                    url: 'https://github.com/jaysofty/my-docker-app.git'
             }
         }
 
-        stage('Build Image') {
+        stage('Build Docker Image') {
             steps {
-                sh 'docker build -t $IMAGE_NAME:$TAG .'
+                sh """
+                docker build -t $IMAGE_NAME:${BUILD_NUMBER} .
+                """
             }
         }
 
-        stage('Scan Image (Trivy)') {
+        stage('Trivy Security Scan') {
             steps {
-        sh '''pipeline {
-    agent any
-
-    environment {
-        IMAGE_NAME = "jaysoft007/my-app"
-        TAG = "${BUILD_NUMBER}"
-        DOCKER_CREDS = credentials('dockerhub-creds')
-    }
-
-    stages {
-
-        stage('Checkout') {
-            steps {
-                git 'https://github.com/jaysofty/my-app.git'
+                sh """
+                trivy image $IMAGE_NAME:${BUILD_NUMBER}
+                """
             }
         }
 
-        stage('Build Image') {
+        stage('Run Container Test') {
             steps {
-                sh 'docker build -t $IMAGE_NAME:$TAG .'
-            }
-        }
-
-        stage('Scan Image (Trivy)') {
-            steps {
-                sh '''
-                trivy image \
-                  --exit-code 1 \
-                  --severity HIGH,CRITICAL \
-                  --format template \
-                  --template "@html.tpl" \
-                  -o trivy-report.html \
-                  $IMAGE_NAME:$TAG
-                '''
+                sh """
+                docker run -d --name test-app -p 8081:80 $IMAGE_NAME:${BUILD_NUMBER}
+                sleep 5
+                docker ps
+                docker stop test-app
+                docker rm test-app
+                """
             }
         }
 
         stage('Login to DockerHub') {
             steps {
-                sh '''
-                echo $DOCKER_CREDS_PSW | docker login -u $DOCKER_CREDS_USR --password-stdin
-                '''
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-creds',
+                    usernameVariable: 'USER',
+                    passwordVariable: 'PASS'
+                )]) {
+                    sh """
+                    echo $PASS | docker login -u $USER --password-stdin
+                    """
+                }
             }
         }
 
         stage('Push Image') {
             steps {
-                sh 'docker push $IMAGE_NAME:$TAG'
-            }
-        }
-
-        stage('Deploy') {
-            when {
-                expression { currentBuild.currentResult == 'SUCCESS' }
-            }
-            steps {
-                sh '''
-                docker stop my-app || true
-                docker rm my-app || true
-
-                docker run -d -p 8081:80 \
-                  --name my-app \
-                  $IMAGE_NAME:$TAG
-                '''
+                sh """
+                docker tag $IMAGE_NAME:${BUILD_NUMBER} $DOCKERHUB_USER/$IMAGE_NAME:${BUILD_NUMBER}
+                docker push $DOCKERHUB_USER/$IMAGE_NAME:${BUILD_NUMBER}
+                """
             }
         }
     }
 
     post {
-        success {
-            echo "🚀 Deployment Successful"
-        }
-        failure {
-            echo "❌ Build Failed"
-        }
-    }
-}
-        trivy image \
-          --format template \
-          --template "@html.tpl" \
-          -o trivy-report.html \
-          $IMAGE_NAME:$TAG
-        '''
-        }
-}
-
-        stage('Login to DockerHub') {
-            steps {
-                sh '''
-                echo $DOCKER_CREDS_PSW | docker login -u $DOCKER_CREDS_USR --password-stdin
-                '''
-            }
-        }
-
-        stage('Push Image') {
-            steps {
-                sh 'docker push $IMAGE_NAME:$TAG'
-            }
-        }
-
-        stage('Deploy') {
-            steps {
-                sh '''
-                docker stop my-app || true
-                docker rm my-app || true
-
-                docker run -d -p 8081:80 \
-                  --name my-app \
-                  $IMAGE_NAME:$TAG
-                '''
-            }
-        }
-    }
-    post {
-        success {
-            echo "🚀 Deployment Successful"
-        }
-        failure {
-            echo "❌ Build Failed"
+        always {
+            sh """
+            docker system prune -f || true
+            """
         }
     }
 }
